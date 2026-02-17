@@ -64,9 +64,9 @@ jobs:
       - name: Deploy to VM via SSH
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.MAIN_SERVICE_SSH_HOST }}
-          username: ${{ secrets.MAIN_SERVICE_SSH_USER }}
-          key: ${{ secrets.MAIN_SERVICE_SSH_PRIVATE_KEY }}
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
             cd /home/turikroma15/mary-deployment
