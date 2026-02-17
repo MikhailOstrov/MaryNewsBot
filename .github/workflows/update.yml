@@ -1,0 +1,81 @@
+name: build-push-deploy-bot
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+
+jobs:
+  # --- ЗАДАЧА 1: СБОРКА И ПУБЛИКАЦИЯ ОБРАЗА ---
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Determine Image Tag
+        id: docker_meta
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "VERSION_TAG=latest" >> $GITHUB_ENV
+          elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
+            echo "VERSION_TAG=dev" >> $GITHUB_ENV
+          fi
+
+      - name: Build and push Bot image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKER_HUB_USERNAME }}/mr-assistant2025:bot-${{ env.VERSION_TAG }}
+          cache-from: type=gha,scope=${{ github.workflow }}-bot-${{ github.ref }}
+          cache-to: type=gha,scope=${{ github.workflow }}-bot-${{ github.ref }},mode=max
+
+  # --- ЗАДАЧА 2: ДЕПЛОЙ НА ВМ ---
+  deploy:
+    name: Deploy to VM
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+    steps:
+      - name: Determine Environment
+        id: deploy_meta
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "ENV_FILE=.env.prod" >> $GITHUB_ENV
+            echo "BOT_SERVICE=prod_bot" >> $GITHUB_ENV
+          elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
+            echo "ENV_FILE=.env.dev" >> $GITHUB_ENV
+            echo "BOT_SERVICE=dev_bot" >> $GITHUB_ENV
+          fi
+
+      - name: Deploy to VM via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.MAIN_SERVICE_SSH_HOST }}
+          username: ${{ secrets.MAIN_SERVICE_SSH_USER }}
+          key: ${{ secrets.MAIN_SERVICE_SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /home/turikroma15/mary-deployment
+
+            echo ">>> Redeploying bot..."
+            # 1. Скачиваем новый образ
+            sudo docker compose pull ${{ env.BOT_SERVICE }}
+            # 2. Перезапускаем сервис
+            sudo docker compose --env-file ${{ env.ENV_FILE }} up -d ${{ env.BOT_SERVICE }}
+            echo ">>> Bot redeployed."
+
+            echo ">>> Deployment finished successfully!"
